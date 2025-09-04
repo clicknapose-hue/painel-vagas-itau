@@ -1,0 +1,341 @@
+import React, { useState } from "react";
+import {
+  PieChart,
+  Pie,
+  Cell,
+  Tooltip as RechartsTooltip,
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Legend,
+  LineChart,
+  Line,
+  CartesianGrid,
+} from "recharts";
+
+/*
+ * Painel Executivo – Vagas Projeto Itaú
+ *
+ * Este componente React produz um painel web composto por duas páginas fixas:
+ *  - Página 2024: resumo de vagas abertas, aprovadas e canceladas em 2024;
+ *  - Página 2025: resumo de vagas em 2025.
+ *
+ * Os dados deste painel foram extraídos da planilha fornecida pelo usuário
+ * (arquivo Vagas_Itau.xlsx) e sintetizados conforme regras de negócio:
+ *   • Cada linha da planilha representa uma vaga única, independente do
+ *     número de posições (coluna "Numero de vagas").
+ *   • Cada vaga equivale a R$ 27.000,00 em volume financeiro.
+ *   • Os indicadores financeiros são calculados multiplicando o
+ *     número de linhas em cada status pelo valor unitário (27 mil).
+ *   • Os gráficos de barras e linhas usam o total de posições (coluna
+ *     "Numero de vagas") para identificar os perfis e a evolução mensal.
+ *
+ * O layout segue três blocos: cartões (KPIs), gráficos executivos e uma
+ * tabela resumo simplificada. As cores primárias são neutras com
+ * destaque em vinho (Minsait) e laranja (Itaú).
+ */
+
+// Paleta de cores
+const ITAU_ORANGE = "#ff6d00";
+const MINSAIT_WINE = "#701516";
+const NEUTRAL_BG = "#f7f7f7";
+const NEUTRAL_CARD = "#ffffff";
+
+// Dados calculados para 2024 e 2025
+const summary2024 = {
+  openRows: 0,
+  openPositions: 0,
+  approvedRows: 20,
+  approvedPositions: 210,
+  cancelledRows: 26,
+  cancelledPositions: 923,
+  avgHireTime: null, // tempo médio de contratação não aplicável (datas negativas)
+  avgOpenTime: null,
+  volumeCancelled: 26 * 27000,
+  volumeApproved: 20 * 27000,
+  volumeOpen: 0,
+};
+
+const summary2025 = {
+  openRows: 2,
+  openPositions: 43,
+  approvedRows: 0,
+  approvedPositions: 0,
+  cancelledRows: 2,
+  cancelledPositions: 99,
+  avgHireTime: null,
+  avgOpenTime: 11.0,
+  volumeCancelled: 2 * 27000,
+  volumeApproved: 0,
+  volumeOpen: 2 * 27000,
+  interviews: 4,
+  cvs: 43,
+};
+
+// Perfis mais demandados em 2024 (por número de posições)
+const topProfiles2024 = [
+  { name: "Java", value: 430 },
+  { name: "DevOps SRE", value: 108 },
+  { name: "Front End", value: 87 },
+  { name: "Tester", value: 79 },
+  { name: "Fullstack", value: 66 },
+];
+
+// Distribuição de tipos (Substituição vs Nova) para 2024 e 2025 (posições)
+const typeDistribution2024 = [
+  { name: "Nova", value: 651 },
+  { name: "Substituição", value: 482 },
+];
+const typeDistribution2025 = [
+  { name: "Nova", value: 22 },
+  { name: "Substituição", value: 120 },
+];
+
+// Séries mensais de vagas por mês (posições) para 2024 e 2025
+const monthlySeries2024 = {
+  months: ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"],
+  open:   [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  approved: [0, 0, 0, 0, 57, 79, 17, 0, 18, 0, 19, 20],
+  cancelled: [0, 0, 0, 0, 258, 143, 79, 171, 137, 0, 48, 0],
+};
+const monthlySeries2025 = {
+  months: ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"],
+  open:   [0, 0, 0, 0, 0, 0, 0, 43, 0, 0, 0, 0],
+  approved: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  cancelled: [49, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+};
+
+// Perfis/skills mais demandados em 2025 (posições)
+const topProfiles2025 = [
+  { name: "ServiceNow", value: 72 },
+  { name: "FullStack", value: 49 },
+  { name: ".Net", value: 21 },
+];
+
+// Função utilitária para formatar valores monetários
+const formatCurrency = (value) => {
+  return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+};
+
+// Componente de cartão KPI
+const KpiCard = ({ title, value, subtitle }) => (
+  <div className="flex flex-col justify-between p-4 rounded-xl shadow-sm" style={{ backgroundColor: NEUTRAL_CARD }}>
+    <div className="text-sm text-gray-600 uppercase mb-1 font-medium">{title}</div>
+    <div className="text-3xl font-bold text-gray-800">{value}</div>
+    {subtitle && (
+      <div className="text-xs text-gray-500 mt-2" dangerouslySetInnerHTML={{ __html: subtitle }} />
+    )}
+  </div>
+);
+
+// Componente de gráfico de barras horizontais
+const ProfilesBarChart = ({ data }) => (
+  <ResponsiveContainer width="100%" height={300}>
+    <BarChart data={data} layout="vertical" margin={{ top: 20, right: 30, left: 50, bottom: 20 }}>
+      <XAxis type="number" hide />
+      <YAxis dataKey="name" type="category" width={100} />
+      <Bar dataKey="value" fill={MINSAIT_WINE} radius={[0, 4, 4, 0]} />
+      <RechartsTooltip formatter={(val) => val} />
+    </BarChart>
+  </ResponsiveContainer>
+);
+
+// Componente de gráfico de pizza
+const SimplePieChart = ({ data, colors }) => (
+  <ResponsiveContainer width="100%" height={300}>
+    <PieChart>
+      <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label>
+        {data.map((entry, index) => (
+          <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />
+        ))}
+      </Pie>
+      <RechartsTooltip formatter={(value) => value} />
+    </PieChart>
+  </ResponsiveContainer>
+);
+
+// Componente de gráfico de linhas para evolução mensal
+const MonthlyLineChart = ({ data, colors }) => {
+  const chartData = data.months.map((month, idx) => ({
+    month,
+    Aberta: data.open[idx],
+    Aprovada: data.approved[idx],
+    Cancelada: data.cancelled[idx],
+  }));
+  return (
+    <ResponsiveContainer width="100%" height={300}>
+      <LineChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+        <CartesianGrid stroke="#eee" strokeDasharray="5 5" />
+        <XAxis dataKey="month" tick={{ fontSize: 12 }} />
+        <YAxis tick={{ fontSize: 12 }} />
+        <Legend />
+        <Line type="monotone" dataKey="Aberta" stroke={colors[0]} strokeWidth={2} />
+        <Line type="monotone" dataKey="Aprovada" stroke={colors[1]} strokeWidth={2} />
+        <Line type="monotone" dataKey="Cancelada" stroke={colors[2]} strokeWidth={2} />
+        <RechartsTooltip formatter={(value) => value} />
+      </LineChart>
+    </ResponsiveContainer>
+  );
+};
+
+// Componente de tabela resumo
+const SummaryTable = ({ year }) => {
+  // Exibe linhas simplificadas da planilha originais (representação estática nesta demo)
+  // Em aplicação real, pode-se carregar dados via API ou contexto.
+  // Aqui construímos exemplos para ilustrar o layout.
+  const rows2024 = [
+    { Perfil: "Java", Tipo: "Nova", Status: "APROVADO", Cliente: "Rafael U.", Area: "iCarros", DataAbertura: "2023-05-10", DataContratacao: "2023-06-10" },
+    { Perfil: "Tester", Tipo: "Substituição", Status: "CANCELADA", Cliente: "Ariane A.", Area: "Riscos", DataAbertura: "2023-05-15", DataContratacao: "-" },
+    { Perfil: "Fullstack", Tipo: "Nova", Status: "CANCELADA", Cliente: "Cesar Z.", Area: "Seg. Info", DataAbertura: "2023-08-01", DataContratacao: "-" },
+  ];
+  const rows2025 = [
+    { Perfil: "ServiceNow", Tipo: "Substituição", Status: "ABERTA", Cliente: "Solange S.", Area: "Seg. Info", DataAbertura: "2025-08-22", DataContratacao: "-" },
+    { Perfil: "FullStack", Tipo: "Substituição", Status: "CANCELADA", Cliente: "Solange S.", Area: "Seg. Info", DataAbertura: "2025-01-15", DataContratacao: "-" },
+  ];
+  const rows = year === 2024 ? rows2024 : rows2025;
+  return (
+    <div className="overflow-x-auto mt-4">
+      <table className="min-w-full text-sm">
+        <thead>
+          <tr className="text-left bg-gray-100">
+            <th className="px-3 py-2">Perfil</th>
+            <th className="px-3 py-2">Tipo</th>
+            <th className="px-3 py-2">Status</th>
+            <th className="px-3 py-2">Cliente</th>
+            <th className="px-3 py-2">Área</th>
+            <th className="px-3 py-2">Data Abertura</th>
+            <th className="px-3 py-2">Data Contratação</th>
+            <th className="px-3 py-2">Volume</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, index) => (
+            <tr key={index} className={index % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+              <td className="px-3 py-2">{row.Perfil}</td>
+              <td className="px-3 py-2">{row.Tipo}</td>
+              <td className="px-3 py-2">{row.Status}</td>
+              <td className="px-3 py-2">{row.Cliente}</td>
+              <td className="px-3 py-2">{row.Area}</td>
+              <td className="px-3 py-2">{row.DataAbertura}</td>
+              <td className="px-3 py-2">{row.DataContratacao}</td>
+              <td className="px-3 py-2">R$ 27K</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
+export default function Dashboard() {
+  const [activeTab, setActiveTab] = useState("2024");
+  const is2024 = activeTab === "2024";
+  const summary = is2024 ? summary2024 : summary2025;
+  return (
+    <div className="min-h-screen p-6" style={{ backgroundColor: NEUTRAL_BG }}>
+      {/* Navegação entre páginas */}
+      <div className="flex justify-between items-center mb-4">
+        <div className="flex space-x-2">
+          {['2024','2025'].map((year) => (
+            <button
+              key={year}
+              onClick={() => setActiveTab(year)}
+              style={{
+                backgroundColor: activeTab === year ? MINSAIT_WINE : NEUTRAL_CARD,
+                color: activeTab === year ? '#fff' : '#333',
+                borderRadius: '6px',
+                padding: '6px 12px',
+                fontWeight: '500',
+              }}
+            >
+              Página {year}
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={() => window.print()}
+          style={{ backgroundColor: ITAU_ORANGE, color: '#fff', borderRadius: '6px', padding: '6px 12px' }}
+        >
+          Imprimir/Salvar
+        </button>
+      </div>
+      {/* KPIs */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
+        {is2024 ? (
+          <>
+            <KpiCard title="Vagas abertas" value={summary.openPositions} />
+            <KpiCard title="Vagas aprovadas" value={summary.approvedPositions} />
+            <KpiCard title="Vagas canceladas" value={summary.cancelledPositions} />
+            <KpiCard title="Tempo médio contratação" value={summary.avgHireTime ? `${summary.avgHireTime} dias` : '—'} />
+            <KpiCard title="Tempo médio em aberto" value={summary.avgOpenTime ? `${summary.avgOpenTime} dias` : '—'} />
+            <KpiCard title="Volume vagas canceladas" value={formatCurrency(summary.volumeCancelled)} />
+            <KpiCard title="Volume vagas aprovadas" value={formatCurrency(summary.volumeApproved)} />
+          </>
+        ) : (
+          <>
+            <KpiCard title="Vagas abertas" value={summary.openPositions} />
+            <KpiCard title="Vagas aprovadas" value={summary.approvedPositions} />
+            <KpiCard title="Vagas canceladas" value={summary.cancelledPositions} subtitle="(motivo: Budget)" />
+            <KpiCard title="Tempo médio em aberto" value={`${summary.avgOpenTime} dias`} />
+            <KpiCard title="Volume vagas canceladas" value={formatCurrency(summary.volumeCancelled)} />
+            <KpiCard title="Volume vagas abertas" value={formatCurrency(summary.volumeOpen)} />
+            <KpiCard title="Entrevistas realizadas" value={summary.interviews} />
+            <KpiCard title="CVs analisados" value={summary.cvs} />
+          </>
+        )}
+      </div>
+      {/* Gráficos */}
+      {is2024 ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Perfis mais demandados */}
+          <div className="p-4 rounded-xl shadow-sm" style={{ backgroundColor: NEUTRAL_CARD }}>
+            <h3 className="text-lg font-semibold mb-2">Perfis mais demandados (2024)</h3>
+            <ProfilesBarChart data={topProfiles2024} />
+          </div>
+          {/* Distribuição Substituição vs Nova */}
+          <div className="p-4 rounded-xl shadow-sm" style={{ backgroundColor: NEUTRAL_CARD }}>
+            <h3 className="text-lg font-semibold mb-2">Distribuição por Tipo</h3>
+            <SimplePieChart data={typeDistribution2024} colors={[MINSAIT_WINE, ITAU_ORANGE]} />
+          </div>
+          {/* Evolução mensal */}
+          <div className="p-4 rounded-xl shadow-sm col-span-1 md:col-span-2" style={{ backgroundColor: NEUTRAL_CARD }}>
+            <h3 className="text-lg font-semibold mb-2">Evolução mensal de vagas (2024)</h3>
+            <MonthlyLineChart data={monthlySeries2024} colors={[ITAU_ORANGE, MINSAIT_WINE, '#999999']} />
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Distribuição Aberta × Cancelada × Aprovada */}
+          <div className="p-4 rounded-xl shadow-sm" style={{ backgroundColor: NEUTRAL_CARD }}>
+            <h3 className="text-lg font-semibold mb-2">Distribuição de status (2025)</h3>
+            <SimplePieChart
+              data={[
+                { name: "Aberta", value: summary.openPositions },
+                { name: "Aprovada", value: summary.approvedPositions },
+                { name: "Cancelada", value: summary.cancelledPositions },
+              ]}
+              colors={[ITAU_ORANGE, MINSAIT_WINE, '#999999']}
+            />
+          </div>
+          {/* Skills/Perfis mais demandados 2025 */}
+          <div className="p-4 rounded-xl shadow-sm" style={{ backgroundColor: NEUTRAL_CARD }}>
+            <h3 className="text-lg font-semibold mb-2">Skills/Perfis mais demandados (2025)</h3>
+            <ProfilesBarChart data={topProfiles2025} />
+          </div>
+          {/* Evolução 2025 */}
+          <div className="p-4 rounded-xl shadow-sm col-span-1 md:col-span-2" style={{ backgroundColor: NEUTRAL_CARD }}>
+            <h3 className="text-lg font-semibold mb-2">Evolução mensal de vagas (2025)</h3>
+            <MonthlyLineChart data={monthlySeries2025} colors={[ITAU_ORANGE, MINSAIT_WINE, '#999999']} />
+          </div>
+        </div>
+      )}
+      {/* Tabela resumo */}
+      <div className="mt-6">
+        <h3 className="text-lg font-semibold mb-2">Tabela Resumo {is2024 ? "2024" : "2025"}</h3>
+        <SummaryTable year={is2024 ? 2024 : 2025} />
+      </div>
+    </div>
+  );
+}
